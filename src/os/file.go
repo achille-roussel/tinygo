@@ -98,7 +98,11 @@ func Create(name string) (*File, error) {
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
 func (f *File) Read(b []byte) (n int, err error) {
-	n, err = f.handle.Read(b)
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		n, err = f.handle.Read(b)
+	}
 	// TODO: want to always wrap, like upstream, but ReadFile() compares against exactly io.EOF?
 	if err != nil && err != io.EOF {
 		err = &PathError{"read", f.name, err}
@@ -114,6 +118,9 @@ var errNegativeOffset = errors.New("negative offset")
 func (f *File) ReadAt(b []byte, offset int64) (n int, err error) {
 	if offset < 0 {
 		return 0, &PathError{Op: "readat", Path: f.name, Err: errNegativeOffset}
+	}
+	if f.handle == nil {
+		return 0, &PathError{Op: "readat", Path: f.name, Err: ErrClosed}
 	}
 
 	for len(b) > 0 {
@@ -138,7 +145,11 @@ func (f *File) ReadAt(b []byte, offset int64) (n int, err error) {
 // Write writes len(b) bytes to the File. It returns the number of bytes written
 // and an error, if any. Write returns a non-nil error when n != len(b).
 func (f *File) Write(b []byte) (n int, err error) {
-	n, err = f.handle.Write(b)
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		n, err = f.handle.Write(b)
+	}
 	if err != nil {
 		err = &PathError{"write", f.name, err}
 	}
@@ -157,7 +168,21 @@ func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
 
 // Close closes the File, rendering it unusable for I/O.
 func (f *File) Close() (err error) {
-	err = f.handle.Close()
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		// Some platforms manage extra state other than the system handle which
+		// needs to be released when the file is closed. For example, darwin
+		// files have a DIR object holding a dup of the file descriptor, and
+		// linux files hold a buffer which needs to be released to a pool.
+		//
+		// These platform-specific logic is provided by the (*file).close method
+		// which is why we do not call the handle's Close method directly.
+		err = f.file.close()
+		if err == nil {
+			f.handle = nil
+		}
+	}
 	if err != nil {
 		err = &PathError{"close", f.name, err}
 	}
@@ -174,7 +199,15 @@ func (f *File) Close() (err error) {
 // system; you can seek to the beginning of the directory on Unix-like
 // operating systems, but not on Windows.
 func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
-	return f.handle.Seek(offset, whence)
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		ret, err = f.handle.Seek(offset, whence)
+	}
+	if err != nil {
+		err = &PathError{Op: "seek", Path: f.name, Err: err}
+	}
+	return
 }
 
 func (f *File) SyscallConn() (syscall.RawConn, error) {
@@ -193,7 +226,7 @@ func (f *File) Fd() uintptr {
 	if ok {
 		return handle.Fd()
 	}
-	return 0
+	return ^uintptr(0)
 }
 
 // Truncate is a stub, not yet implemented

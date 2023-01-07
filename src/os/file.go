@@ -34,11 +34,11 @@ var lstat = Lstat
 func Mkdir(path string, perm FileMode) error {
 	fs, suffix := findMount(path)
 	if fs == nil {
-		return &PathError{"mkdir", path, ErrNotExist}
+		return &PathError{Op: "mkdir", Path: path, Err: ErrNotExist}
 	}
 	err := fs.Mkdir(suffix, perm)
 	if err != nil {
-		return &PathError{"mkdir", path, err}
+		return &PathError{Op: "mkdir", Path: path, Err: err}
 	}
 	return nil
 }
@@ -57,7 +57,7 @@ func fixCount(n int, err error) (int, error) {
 func Remove(path string) error {
 	fs, suffix := findMount(path)
 	if fs == nil {
-		return &PathError{"remove", path, ErrNotExist}
+		return &PathError{Op: "remove", Path: path, Err: ErrNotExist}
 	}
 	err := fs.Remove(suffix)
 	if err != nil {
@@ -76,11 +76,11 @@ func (f *File) Name() string {
 func OpenFile(name string, flag int, perm FileMode) (*File, error) {
 	fs, suffix := findMount(name)
 	if fs == nil {
-		return nil, &PathError{"open", name, ErrNotExist}
+		return nil, &PathError{Op: "open", Path: name, Err: ErrNotExist}
 	}
 	handle, err := fs.OpenFile(suffix, flag, perm)
 	if err != nil {
-		return nil, &PathError{"open", name, err}
+		return nil, &PathError{Op: "open", Path: name, Err: err}
 	}
 	return NewFile(handle, name), nil
 }
@@ -105,7 +105,7 @@ func (f *File) Read(b []byte) (n int, err error) {
 	}
 	// TODO: want to always wrap, like upstream, but ReadFile() compares against exactly io.EOF?
 	if err != nil && err != io.EOF {
-		err = &PathError{"read", f.name, err}
+		err = &PathError{Op: "read", Path: f.name, Err: err}
 	}
 	return
 }
@@ -128,7 +128,7 @@ func (f *File) ReadAt(b []byte, offset int64) (n int, err error) {
 		if e != nil {
 			// TODO: want to always wrap, like upstream, but TestReadAtEOF compares against exactly io.EOF?
 			if e != io.EOF {
-				err = &PathError{"readat", f.name, e}
+				err = &PathError{Op: "readat", Path: f.name, Err: e}
 			} else {
 				err = e
 			}
@@ -151,7 +151,7 @@ func (f *File) Write(b []byte) (n int, err error) {
 		n, err = f.handle.Write(b)
 	}
 	if err != nil {
-		err = &PathError{"write", f.name, err}
+		err = &PathError{Op: "write", Path: f.name, Err: err}
 	}
 	return
 }
@@ -163,7 +163,13 @@ func (f *File) WriteString(s string) (n int, err error) {
 }
 
 func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
-	return 0, ErrNotImplemented
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		err = ErrNotImplemented
+	}
+	err = &PathError{Op: "writeat", Path: f.name, Err: err}
+	return
 }
 
 // Close closes the File, rendering it unusable for I/O.
@@ -184,7 +190,7 @@ func (f *File) Close() (err error) {
 		}
 	}
 	if err != nil {
-		err = &PathError{"close", f.name, err}
+		err = &PathError{Op: "close", Path: f.name, Err: err}
 	}
 	return
 }
@@ -210,8 +216,13 @@ func (f *File) Seek(offset int64, whence int) (ret int64, err error) {
 	return
 }
 
-func (f *File) SyscallConn() (syscall.RawConn, error) {
-	return nil, ErrNotImplemented
+func (f *File) SyscallConn() (conn syscall.RawConn, err error) {
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		err = ErrNotImplemented
+	}
+	return
 }
 
 // fd is an internal interface that is used to try a type assertion in order to
@@ -230,8 +241,13 @@ func (f *File) Fd() uintptr {
 }
 
 // Truncate is a stub, not yet implemented
-func (f *File) Truncate(size int64) error {
-	return &PathError{"truncate", f.name, ErrNotImplemented}
+func (f *File) Truncate(size int64) (err error) {
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		err = ErrNotImplemented
+	}
+	return &PathError{Op: "truncate", Path: f.name, Err: err}
 }
 
 // LinkError records an error during a link or symlink or rename system call and

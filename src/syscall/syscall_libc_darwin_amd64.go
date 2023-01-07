@@ -19,8 +19,8 @@ func libc_fdopendir(fd int32) unsafe.Pointer
 
 // int closedir(struct DIR * buf);
 //
-//export closedir$INODE64
-func libc_closedir(dir unsafe.Pointer) int32
+//export closedir
+func libc_closedir(unsafe.Pointer) int32
 
 // int readdir_r(struct DIR * buf, struct dirent *entry, struct dirent **result);
 //

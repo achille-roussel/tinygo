@@ -681,7 +681,7 @@ func (b *builder) setDebugLocation(pos token.Pos) {
 	}
 
 	position := b.program.Fset.Position(pos)
-	if b.fn.Synthetic == "package initializer" {
+	if isPackageInitializer(b.fn) {
 		// Package initializers are treated specially, because while individual
 		// Go SSA instructions have file/line/col information, the parent
 		// function does not. LLVM doesn't store filename information per
@@ -1189,7 +1189,7 @@ func (b *builder) createFunctionStart(intrinsic bool) {
 
 	// Add debug info, if needed.
 	if b.Debug {
-		if b.fn.Synthetic == "package initializer" {
+		if isPackageInitializer(b.fn) {
 			// Package initializer functions have no debug info. Create some
 			// fake debug info to at least have *something*.
 			b.difunc = b.attachDebugInfoRaw(b.fn, b.llvmFn, "", b.packageDir, 0)
@@ -1218,7 +1218,7 @@ func (b *builder) createFunctionStart(intrinsic bool) {
 	}
 	b.SetInsertPointAtEnd(entryBlock)
 
-	if b.fn.Synthetic == "package initializer" {
+	if isPackageInitializer(b.fn) {
 		b.initPseudoFuncs = make(map[string]llvm.Metadata)
 
 		// Create a fake 'inlined at' metadata node.

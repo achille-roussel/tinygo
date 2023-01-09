@@ -273,7 +273,10 @@ func (f *File) Truncate(size int64) (err error) {
 	} else {
 		err = f.handle.Truncate(size)
 	}
-	return &PathError{Op: "truncate", Path: f.name, Err: err}
+	if err != nil {
+		err = &PathError{Op: "truncate", Path: f.name, Err: err}
+	}
+	return err
 }
 
 // LinkError records an error during a link or symlink or rename system call and

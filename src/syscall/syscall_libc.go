@@ -137,6 +137,15 @@ func Unlink(path string) (err error) {
 	return
 }
 
+func Truncate(path string, size int64) (err error) {
+	data := cstring(path)
+	fail := libc_truncate(&data[0], size)
+	if fail < 0 {
+		err = getErrno()
+	}
+	return
+}
+
 func Ftruncate(fd int, size int64) (err error) {
 	if libc_ftruncate(int32(fd), size) < 0 {
 		err = getErrno()
@@ -357,6 +366,11 @@ func libc_lseek(fd int32, offset int64, whence int) int64
 //
 //export ftruncate
 func libc_ftruncate(fd int32, size int64) int32
+
+// int truncate(const char *path, off_t length)
+//
+//export truncate
+func libc_truncate(path *byte, size int64) int32
 
 // int close(int fd)
 //

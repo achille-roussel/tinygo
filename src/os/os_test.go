@@ -332,3 +332,23 @@ func TestFTruncate(t *testing.T) {
 		checkSize(t, f, 13+9) // wrote at offset past where hello, world was.
 	}
 }
+
+func TestTruncate(t *testing.T) {
+	f := newFile("TestTruncate", t)
+	defer Remove(f.Name())
+	defer f.Close()
+
+	checkSize(t, f, 0)
+	f.Write([]byte("hello, world\n"))
+	checkSize(t, f, 13)
+	Truncate(f.Name(), 10)
+	checkSize(t, f, 10)
+	Truncate(f.Name(), 1024)
+	checkSize(t, f, 1024)
+	Truncate(f.Name(), 0)
+	checkSize(t, f, 0)
+	_, err := f.Write([]byte("surprise!"))
+	if err == nil {
+		checkSize(t, f, 13+9) // wrote at offset past where hello, world was.
+	}
+}

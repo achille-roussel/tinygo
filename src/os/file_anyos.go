@@ -46,6 +46,17 @@ func Rename(oldpath, newpath string) error {
 	return rename(oldpath, newpath)
 }
 
+// Truncate changes the size of the named file.
+// If the file is a symbolic link, it changes the size of the link's target.
+// If there is an error, it will be of type *PathError.
+func Truncate(path string, size int64) error {
+	err := ignoringEINTR(func() error { return syscall.Truncate(path, size) })
+	if err != nil {
+		err = &PathError{Op: "truncate", Path: path, Err: err}
+	}
+	return err
+}
+
 // unixFilesystem is an empty handle for a Unix/Linux filesystem. All operations
 // are relative to the current working directory.
 type unixFilesystem struct {

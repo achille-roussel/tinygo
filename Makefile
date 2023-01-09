@@ -410,7 +410,7 @@ tinygo-bench-fast:
 tinygo-test-wasi:
 	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_SLOW) ./tests/runtime_wasi
 ifeq ($(TEST_IOFS),true)
-	$(TINYGO) test -target wasi io/fs
+	$(TINYGO) test -target wasi -stack-size=6MB io/fs
 endif
 tinygo-test-wasi-fast:
 	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) ./tests/runtime_wasi

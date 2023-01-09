@@ -303,6 +303,10 @@ func Test(pkgName string, stdout, stderr io.Writer, options *compileopts.Options
 			// TODO: add option to not delete temp dir for debugging?
 			defer os.RemoveAll(tmpdir)
 
+			if options.StackSize != 0 {
+				args = append(args, fmt.Sprintf("--max-wasm-stack=%d", options.StackSize))
+			}
+
 			// The below re-organizes the arguments so that the current
 			// directory is added last.
 			args = append(args, cmd.Args[1:]...)

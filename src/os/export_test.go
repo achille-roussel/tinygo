@@ -6,5 +6,6 @@ package os
 
 // Export for testing.
 
+var Atime = atime
 var ErrWriteAtInAppendMode = errWriteAtInAppendMode
 var ErrPatternHasSeparator = errPatternHasSeparator

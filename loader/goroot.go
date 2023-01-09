@@ -284,7 +284,7 @@ func mirror(oldname, newname string) error {
 		}
 
 		if os.Link(source, target) == nil {
-			return os.Chmod(target, info.Mode())
+			return nil
 		}
 
 		// Making a hardlink failed. Try copying the file as fallback.

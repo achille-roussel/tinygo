@@ -259,6 +259,24 @@ func Pipe2(fds []int, flags int) (err error) {
 	return
 }
 
+func Open(path string, flag int, mode uint32) (fd int, err error) {
+	data := cstring(path)
+	fd = int(libc_open(&data[0], int32(flag), mode))
+	if fd < 0 {
+		err = getErrno()
+	}
+	return
+}
+
+func Chmod(path string, mode uint32) (err error) {
+	data := cstring(path)
+	fail := int(libc_chmod(&data[0], mode))
+	if fail < 0 {
+		err = getErrno()
+	}
+	return
+}
+
 func closedir(dir uintptr) (err error) {
 	e := libc_closedir(unsafe.Pointer(dir))
 	if e != 0 {
@@ -293,3 +311,8 @@ func libc_getpagesize() int32
 //
 //export syscall_libc_open
 func libc_open(pathname *byte, flags int32, mode uint32) int32
+
+// int chmod(const char *pathname, mode_t mode);
+//
+//export chmod
+func libc_chmod(pathname *byte, mode uint32) int32

@@ -100,13 +100,18 @@ type unixFileHandle uintptr
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
 func (f unixFileHandle) Read(b []byte) (n int, err error) {
-	err = ignoringEINTR(func() (err error) {
-		n, err = syscall.Read(syscallFd(f), b)
-		return
-	})
-	err = handleSyscallError(err)
-	if n == 0 && len(b) > 0 && err == nil {
-		err = io.EOF
+	for n < len(b) {
+		var r int
+		r, err = syscall.Read(syscallFd(f), b[n:])
+		if r > 0 {
+			n += r
+		} else if r == 0 && err == nil {
+			err = io.EOF
+			break
+		} else if err != nil && err != syscall.EINTR {
+			err = handleSyscallError(err)
+			break
+		}
 	}
 	return
 }
@@ -114,11 +119,19 @@ func (f unixFileHandle) Read(b []byte) (n int, err error) {
 // Write writes len(b) bytes to the File. It returns the number of bytes written
 // and an error, if any. Write returns a non-nil error when n != len(b).
 func (f unixFileHandle) Write(b []byte) (n int, err error) {
-	err = ignoringEINTR(func() (err error) {
-		n, err = syscall.Write(syscallFd(f), b)
-		return
-	})
-	err = handleSyscallError(err)
+	for n < len(b) {
+		var w int
+		w, err = syscall.Write(syscallFd(f), b[n:])
+		if w > 0 {
+			n += w
+		} else if err == nil {
+			err = io.ErrNoProgress
+			break
+		} else if err != syscall.EINTR {
+			err = handleSyscallError(err)
+			break
+		}
+	}
 	return
 }
 

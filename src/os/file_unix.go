@@ -117,13 +117,19 @@ func Readlink(name string) (string, error) {
 // At end of file, Pread returns 0, io.EOF.
 // TODO: move to file_anyos once ReadAt is implemented for windows
 func (f unixFileHandle) ReadAt(b []byte, offset int64) (n int, err error) {
-	err = ignoringEINTR(func() (err error) {
-		n, err = syscall.Pread(syscallFd(f), b, offset)
-		return
-	})
-	err = handleSyscallError(err)
-	if n == 0 && len(b) > 0 && err == nil {
-		err = io.EOF
+	for n < len(b) {
+		var r int
+		r, err = syscall.Pread(syscallFd(f), b[n:], offset)
+		if r > 0 {
+			n += r
+			offset += int64(r)
+		} else if r == 0 && err == nil {
+			err = io.EOF
+			break
+		} else if err != nil && err != syscall.EINTR {
+			err = handleSyscallError(err)
+			break
+		}
 	}
 	return
 }
@@ -136,11 +142,21 @@ func (f unixFileHandle) ReadAt(b []byte, offset int64) (n int, err error) {
 //
 // TODO: move to file_anyos once WriteAt is implemented for windows.
 func (f unixFileHandle) WriteAt(b []byte, offset int64) (n int, err error) {
-	err = ignoringEINTR(func() (err error) {
-		n, err = syscall.Pwrite(syscallFd(f), b, offset)
-		return
-	})
-	return n, handleSyscallError(err)
+	for n < len(b) {
+		var w int
+		w, err = syscall.Pwrite(syscallFd(f), b[n:], offset)
+		if w > 0 {
+			n += w
+			offset += int64(w)
+		} else if err == nil {
+			err = io.ErrNoProgress
+			break
+		} else if err != syscall.EINTR {
+			err = handleSyscallError(err)
+			break
+		}
+	}
+	return
 }
 
 // Seek wraps syscall.Seek.

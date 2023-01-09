@@ -29,8 +29,9 @@ type stdioFileHandle uint8
 // can overwrite this data, which could cause the finalizer
 // to close the wrong file descriptor.
 type file struct {
-	handle FileHandle
-	name   string
+	handle     FileHandle
+	name       string
+	appendMode bool
 }
 
 func (f *file) close() error {
@@ -38,7 +39,7 @@ func (f *file) close() error {
 }
 
 func NewFile(fd uintptr, name string) *File {
-	return &File{&file{stdioFileHandle(fd), name}}
+	return &File{&file{handle: stdioFileHandle(fd), name: name}}
 }
 
 // Read reads up to len(b) bytes from machine.Serial.

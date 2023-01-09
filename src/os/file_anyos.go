@@ -85,7 +85,11 @@ func (fs unixFilesystem) Remove(path string) error {
 }
 
 func (fs unixFilesystem) OpenFile(path string, flag int, perm FileMode) (uintptr, error) {
-	fp, err := syscall.Open(path, flag, uint32(perm))
+	var fp int
+	var err = ignoringEINTR(func() (err error) {
+		fp, err = syscall.Open(path, flag, uint32(perm))
+		return
+	})
 	return uintptr(fp), handleSyscallError(err)
 }
 
@@ -96,7 +100,10 @@ type unixFileHandle uintptr
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
 func (f unixFileHandle) Read(b []byte) (n int, err error) {
-	n, err = syscall.Read(syscallFd(f), b)
+	err = ignoringEINTR(func() (err error) {
+		n, err = syscall.Read(syscallFd(f), b)
+		return
+	})
 	err = handleSyscallError(err)
 	if n == 0 && len(b) > 0 && err == nil {
 		err = io.EOF
@@ -107,14 +114,18 @@ func (f unixFileHandle) Read(b []byte) (n int, err error) {
 // Write writes len(b) bytes to the File. It returns the number of bytes written
 // and an error, if any. Write returns a non-nil error when n != len(b).
 func (f unixFileHandle) Write(b []byte) (n int, err error) {
-	n, err = syscall.Write(syscallFd(f), b)
+	err = ignoringEINTR(func() (err error) {
+		n, err = syscall.Write(syscallFd(f), b)
+		return
+	})
 	err = handleSyscallError(err)
 	return
 }
 
 // Close closes the File, rendering it unusable for I/O.
 func (f unixFileHandle) Close() error {
-	return handleSyscallError(syscall.Close(syscallFd(f)))
+	err := ignoringEINTR(func() error { return syscall.Close(syscallFd(f)) })
+	return handleSyscallError(err)
 }
 
 func (f unixFileHandle) Fd() uintptr {

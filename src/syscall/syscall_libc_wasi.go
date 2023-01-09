@@ -415,7 +415,13 @@ func Pipe2(p []int, flags int) (err error) {
 }
 
 func Chmod(path string, mode uint32) (err error) {
-	return ENOSYS // wasi does not have chmod
+	// wasi does not have chmod, but there are tests that validate that calling
+	// os.Chmod does not error (e.g. io/fs.TestIssue51617).
+	//
+	// We make a call to Lstat instead so we detect conditions like the path not
+	// existing, but we don't honnor the request to modify the file permissions.
+	stat := Stat_t{}
+	return Lstat(path, &stat)
 }
 
 func Getpagesize() int {

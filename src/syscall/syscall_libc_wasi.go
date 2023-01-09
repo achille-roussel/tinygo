@@ -337,12 +337,27 @@ func Readdir(dir uintptr) (dirent *Dirent, err error) {
 }
 
 func Open(path string, flag int, mode uint32) (fd int, err error) {
+	if (flag & O_APPEND) != 0 {
+		// wasi-libc requires either O_WRONLY or O_RDWR if O_APPEND is set or it
+		// errors with EINVAL.
+		//
+		// Since O_RDWR is defined as O_RDONLY|O_WRONLY, we cannot assume
+		// that a combination like O_APPEND|O_RDONLY is invalid since it
+		// might be caused by O_APPEND|O_RDWR.
+		//
+		// For this reason, we keep it simple and assume write permission was
+		// requested if O_APPEND is passed, which is needed tests like
+		// os.TestWriteAtAppendMode to pass.
+		flag |= O_WRONLY
+	}
+
 	data := cstring(path)
 	stat := Stat_t{}
 	fd = int(libc_open(&data[0], int32(flag), mode))
 	if fd < 0 {
 		return -1, getErrno()
 	}
+
 	if (flag & O_DIRECTORY) == 0 {
 		if err := Fstat(fd, &stat); err != nil {
 			Close(fd)
@@ -360,6 +375,7 @@ func Open(path string, flag int, mode uint32) (fd int, err error) {
 			}
 		}
 	}
+
 	return fd, nil
 }
 

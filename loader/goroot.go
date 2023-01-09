@@ -1,7 +1,7 @@
 package loader
 
 // This file constructs a new temporary GOROOT directory by merging both the
-// standard Go GOROOT and the GOROOT from TinyGo using symlinks.
+// standard Go GOROOT and the GOROOT from TinyGo.
 //
 // The goal is to replace specific packages from Go with a TinyGo version. It's
 // never a partial replacement, either a package is fully replaced or it is not.
@@ -20,11 +20,11 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/tinygo-org/tinygo/compileopts"
@@ -112,9 +112,8 @@ func GetCachedGoroot(config *compileopts.Config) (string, error) {
 		}
 	}
 
-	// Create all symlinks.
 	for dst, src := range merge {
-		err := symlink(src, filepath.Join(tmpgoroot, dst))
+		err := mirror(src, filepath.Join(tmpgoroot, dst))
 		if err != nil {
 			return "", err
 		}
@@ -143,7 +142,8 @@ func GetCachedGoroot(config *compileopts.Config) (string, error) {
 	return cachedgoroot, nil
 }
 
-// listGorootMergeLinks searches goroot and tinygoroot for all symlinks that must be created within the merged goroot.
+// listGorootMergeLinks searches goroot and tinygoroot for all files that must
+// be created within the merged goroot.
 func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]bool) (map[string]string, error) {
 	goSrc := filepath.Join(goroot, "src")
 	tinygoSrc := filepath.Join(tinygoroot, "src")
@@ -256,62 +256,54 @@ func pathsToOverride(goMinor int, needsSyscallPackage bool) map[string]bool {
 	return paths
 }
 
-// symlink creates a symlink or something similar. On Unix-like systems, it
-// always creates a symlink. On Windows, it tries to create a symlink and if
-// that fails, creates a hardlink or directory junction instead.
+// mirror mirrors the files from oldname to newname.
 //
-// Note that while Windows 10 does support symlinks and allows them to be
-// created using os.Symlink, it requires developer mode to be enabled.
-// Therefore provide a fallback for when symlinking is not possible.
-// Unfortunately this fallback only works when TinyGo is installed on the same
-// filesystem as the TinyGo cache and the Go installation (which is usually the
-// C drive).
-func symlink(oldname, newname string) error {
-	symlinkErr := os.Symlink(oldname, newname)
-	if runtime.GOOS == "windows" && symlinkErr != nil {
-		// Fallback for when developer mode is disabled.
-		// Note that we return the symlink error even if something else fails
-		// later on. This is because symlinks are the easiest to support
-		// (they're also used on Linux and MacOS) and enabling them is easy:
-		// just enable developer mode.
-		st, err := os.Stat(oldname)
+// If oldname is a directory, a directory is created at newname and its content
+// is mirrored recursively. Symlinks found in directory trees are not followed.
+//
+// If oldname is a file, the function first attempts to create a hard link, but
+// resorts to making a copy if creating the link fails.
+//
+// A previous version of this function used symlinks to reference files and
+// directories from the Go and Tinygo roots. However, the wasmtime sandbox does
+// not follow symlinks, which caused tests to fails (e.g. for os.DirFS).
+func mirror(oldname, newname string) error {
+	return filepath.Walk(oldname, func(source string, info fs.FileInfo, err error) error {
 		if err != nil {
-			return symlinkErr
+			return err
 		}
-		if st.IsDir() {
-			// Make a directory junction. There may be a way to do this
-			// programmatically, but it involves a lot of magic. Use the mklink
-			// command built into cmd instead (mklink is a builtin, not an
-			// external command).
-			err := exec.Command("cmd", "/k", "mklink", "/J", newname, oldname).Run()
-			if err != nil {
-				return symlinkErr
-			}
-		} else {
-			// Try making a hard link.
-			err := os.Link(oldname, newname)
-			if err != nil {
-				// Making a hardlink failed. Try copying the file as a last
-				// fallback.
-				inf, err := os.Open(oldname)
-				if err != nil {
-					return err
-				}
-				defer inf.Close()
-				outf, err := os.Create(newname)
-				if err != nil {
-					return err
-				}
-				defer outf.Close()
-				_, err = io.Copy(outf, inf)
-				if err != nil {
-					os.Remove(newname)
-					return err
-				}
-				// File was copied.
-			}
+
+		target := filepath.Join(newname, strings.TrimPrefix(source, oldname))
+
+		if _, err := os.Lstat(target); err == nil {
+			return nil // The target already exists, assume its fine?
 		}
-		return nil // success
-	}
-	return symlinkErr
+
+		if info.IsDir() {
+			return os.Mkdir(target, info.Mode())
+		}
+
+		if os.Link(source, target) == nil {
+			return os.Chmod(target, info.Mode())
+		}
+
+		// Making a hardlink failed. Try copying the file as fallback.
+		sourceFile, err := os.Open(source)
+		if err != nil {
+			return err
+		}
+		defer sourceFile.Close()
+
+		targetFile, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer targetFile.Close()
+
+		_, err = io.Copy(targetFile, sourceFile)
+		if err != nil {
+			os.Remove(target)
+		}
+		return err
+	})
 }

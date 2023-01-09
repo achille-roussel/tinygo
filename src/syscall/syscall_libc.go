@@ -62,15 +62,6 @@ func Seek(fd int, offset int64, whence int) (newoffset int64, err error) {
 	return
 }
 
-func Open(path string, flag int, mode uint32) (fd int, err error) {
-	data := cstring(path)
-	fd = int(libc_open(&data[0], int32(flag), mode))
-	if fd < 0 {
-		err = getErrno()
-	}
-	return
-}
-
 func Readlink(path string, p []byte) (n int, err error) {
 	data := cstring(path)
 	buf, count := splitSlice(p)
@@ -84,15 +75,6 @@ func Readlink(path string, p []byte) (n int, err error) {
 func Chdir(path string) (err error) {
 	data := cstring(path)
 	fail := int(libc_chdir(&data[0]))
-	if fail < 0 {
-		err = getErrno()
-	}
-	return
-}
-
-func Chmod(path string, mode uint32) (err error) {
-	data := cstring(path)
-	fail := int(libc_chmod(&data[0], mode))
 	if fail < 0 {
 		err = getErrno()
 	}
@@ -378,11 +360,6 @@ func libc_mprotect(addr unsafe.Pointer, len uintptr, prot int32) int32
 //
 //export chdir
 func libc_chdir(pathname *byte) int32
-
-// int chmod(const char *pathname, mode_t mode);
-//
-//export chmod
-func libc_chmod(pathname *byte, mode uint32) int32
 
 // int mkdir(const char *pathname, mode_t mode);
 //

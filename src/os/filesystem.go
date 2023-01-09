@@ -58,6 +58,9 @@ type FileHandle interface {
 	// WriteAt writes b to the file at the given absolute offset
 	WriteAt(b []byte, offset int64) (n int, err error)
 
+	// Truncate adjusts the file to the given size
+	Truncate(size int64) (err error)
+
 	// Close closes the file, making it unusable for further writes.
 	Close() (err error)
 }

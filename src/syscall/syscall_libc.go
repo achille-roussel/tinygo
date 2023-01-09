@@ -137,6 +137,13 @@ func Unlink(path string) (err error) {
 	return
 }
 
+func Ftruncate(fd int, size int64) (err error) {
+	if libc_ftruncate(int32(fd), size) < 0 {
+		err = getErrno()
+	}
+	return
+}
+
 func Kill(pid int, sig Signal) (err error) {
 	return ENOSYS // TODO
 }
@@ -345,6 +352,11 @@ func libc_pwrite(fd int32, buf *byte, count uint, offset int64) int
 //
 //export lseek
 func libc_lseek(fd int32, offset int64, whence int) int64
+
+// int ftruncate(int fd, off_t length)
+//
+//export ftruncate
+func libc_ftruncate(fd int32, size int64) int32
 
 // int close(int fd)
 //

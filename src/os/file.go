@@ -271,7 +271,7 @@ func (f *File) Truncate(size int64) (err error) {
 	if f.handle == nil {
 		err = ErrClosed
 	} else {
-		err = ErrNotImplemented
+		err = f.handle.Truncate(size)
 	}
 	return &PathError{Op: "truncate", Path: f.name, Err: err}
 }

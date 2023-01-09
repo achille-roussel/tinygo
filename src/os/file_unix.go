@@ -165,6 +165,11 @@ func (f unixFileHandle) Seek(offset int64, whence int) (int64, error) {
 	return newoffset, handleSyscallError(err)
 }
 
+func (f unixFileHandle) Truncate(size int64) error {
+	err := ignoringEINTR(func() error { return syscall.Ftruncate(syscallFd(f), size) })
+	return handleSyscallError(err)
+}
+
 type unixDirent struct {
 	parent string
 	name   string

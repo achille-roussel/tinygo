@@ -393,7 +393,7 @@ endif
 .PHONY: tinygo-test
 tinygo-test:
 	$(TINYGO) test $(TEST_PACKAGES_HOST) $(TEST_PACKAGES_SLOW)
-	@# io/fs requires os.ReadDir, not yet supported on windows or wasi. It also
+	@# io/fs requires os.ReadDir, not yet supported on windows. It also
 	@# requires a large stack-size. Hence, io/fs is only run conditionally.
 	@# For more details, see the comments on issue #3143.
 ifeq ($(TEST_IOFS),true)
@@ -409,6 +409,9 @@ tinygo-bench-fast:
 # Same thing, except for wasi rather than the current platform.
 tinygo-test-wasi:
 	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) $(TEST_PACKAGES_SLOW) ./tests/runtime_wasi
+ifeq ($(TEST_IOFS),true)
+	$(TINYGO) test -target wasi io/fs
+endif
 tinygo-test-wasi-fast:
 	$(TINYGO) test -target wasi $(TEST_PACKAGES_FAST) ./tests/runtime_wasi
 tinygo-bench-wasi:

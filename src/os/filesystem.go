@@ -60,6 +60,9 @@ type FileHandle interface {
 
 	// Close closes the file, making it unusable for further writes.
 	Close() (err error)
+
+	// Sync blocks until buffered writes have been written to persistent storage
+	Sync() (err error)
 }
 
 // findMount returns the appropriate (mounted) filesystem to use for a given

@@ -251,6 +251,18 @@ func (f *File) SyscallConn() (conn syscall.RawConn, err error) {
 	return
 }
 
+// Sync commits the current contents of the file to stable storage.
+// Typically, this means flushing the file system's in-memory copy of recently
+// written data to disk.
+func (f *File) Sync() (err error) {
+	if f.handle == nil {
+		err = ErrClosed
+	} else {
+		err = f.handle.Sync()
+	}
+	return
+}
+
 // fd is an internal interface that is used to try a type assertion in order to
 // call the Fd() method of the underlying file handle if it is implemented.
 type fd interface {

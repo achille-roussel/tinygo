@@ -71,6 +71,13 @@ func Seek(fd int, offset int64, whence int) (newoffset int64, err error) {
 	return
 }
 
+func Fsync(fd int) (err error) {
+	if libc_fsync(int32(fd)) < 0 {
+		err = getErrno()
+	}
+	return
+}
+
 func Readlink(path string, p []byte) (n int, err error) {
 	data := cstring(path)
 	buf, count := splitSlice(p)
@@ -345,6 +352,11 @@ func libc_pwrite(fd int32, buf *byte, count uint, offset int64) int
 //
 //export lseek
 func libc_lseek(fd int32, offset int64, whence int) int64
+
+// int fsync(int fd);
+//
+//export fsync
+func libc_fsync(fd int32) int32
 
 // int close(int fd)
 //

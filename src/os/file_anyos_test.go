@@ -35,13 +35,17 @@ func TestChdir(t *testing.T) {
 	//
 	// Note that it doesn't work if Chdir is broken, but then this test should
 	// fail and highlight the issue if that is the case.
-	cwd, _ := Getwd()
-	defer Chdir(cwd)
+	oldDir, err := Getwd()
+	if err != nil {
+		t.Errorf("Getwd() returned %v", err)
+		return
+	}
+	defer Chdir(oldDir)
 
 	// create and cd into a new directory
 	dir := "_os_test_TestChDir"
 	Remove(dir)
-	err := Mkdir(dir, 0755)
+	err = Mkdir(dir, 0755)
 	defer Remove(dir) // even though not quite sure which directory it will execute in
 	if err != nil {
 		t.Errorf("Mkdir(%s, 0755) returned %v", dir, err)

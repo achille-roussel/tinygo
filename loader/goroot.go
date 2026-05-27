@@ -97,8 +97,8 @@ func GetCachedGoroot(config *compileopts.Config) (string, error) {
 	// The directories are created in sorted order so that nested directories are created without extra work.
 	{
 		var dirs []string
-		for dir, merge := range overrides {
-			if merge {
+		for dir, mode := range overrides {
+			if mode != overrideTinyGoOnly {
 				dirs = append(dirs, filepath.Join(tmpgoroot, "src", dir))
 			}
 		}
@@ -144,7 +144,7 @@ func GetCachedGoroot(config *compileopts.Config) (string, error) {
 }
 
 // listGorootMergeLinks searches goroot and tinygoroot for all symlinks that must be created within the merged goroot.
-func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]bool, config *compileopts.Config) (map[string]string, error) {
+func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]overrideMode, config *compileopts.Config) (map[string]string, error) {
 	goSrc := filepath.Join(goroot, "src")
 	tinygoSrc := filepath.Join(tinygoroot, "src")
 	merges := make(map[string]string)
@@ -160,8 +160,8 @@ func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]bool, 
 	bctx.BuildTags = config.BuildTags()
 	bctx.Compiler = "gc"
 
-	for dir, merge := range overrides {
-		if !merge {
+	for dir, mode := range overrides {
+		if mode == overrideTinyGoOnly {
 			// Use the TinyGo version.
 			merges[filepath.Join("src", dir)] = filepath.Join(tinygoSrc, dir)
 			continue
@@ -174,6 +174,7 @@ func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]bool, 
 			return nil, err
 		}
 		var hasTinyGoFiles bool
+		tinygoNames := make(map[string]bool)
 		for _, e := range tinygoEntries {
 			if e.IsDir() {
 				continue
@@ -192,6 +193,7 @@ func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]bool, 
 			merges[filepath.Join("src", dir, name)] = filepath.Join(tinygoDir, name)
 
 			hasTinyGoFiles = true
+			tinygoNames[name] = true
 		}
 
 		// Add all directories from $GOROOT that are not part of the TinyGo
@@ -203,14 +205,26 @@ func listGorootMergeLinks(goroot, tinygoroot string, overrides map[string]bool, 
 		}
 		for _, e := range goEntries {
 			isDir := e.IsDir()
-			if hasTinyGoFiles && !isDir {
-				// Only merge files from Go if TinyGo does not have any files.
-				// Otherwise we'd end up with a weird mix from both Go
-				// implementations.
-				continue
+			name := e.Name()
+
+			if !isDir {
+				switch mode {
+				case overrideMergeAll:
+					if hasTinyGoFiles {
+						// All-or-nothing semantics: any matching TinyGo
+						// file claims the directory level; upstream files
+						// are dropped.
+						continue
+					}
+				case overrideShadowByName:
+					if tinygoNames[name] {
+						// Per-file shadowing: only the same-named upstream
+						// file is dropped.
+						continue
+					}
+				}
 			}
 
-			name := e.Name()
 			if _, ok := overrides[path.Join(dir, name)+"/"]; ok {
 				// This entry is overridden by TinyGo.
 				// It has/will be merged elsewhere.
@@ -246,48 +260,73 @@ func needsSyscallPackage(buildTags []string) bool {
 	return false
 }
 
-// The boolean indicates whether to merge the subdirs. True means merge, false
-// means use the TinyGo version.
-func pathsToOverride(goMinor int, needsSyscallPackage bool) map[string]bool {
-	paths := map[string]bool{
-		"":                            true,
-		"crypto/":                     true,
-		"crypto/rand/":                false,
-		"crypto/tls/":                 false,
-		"crypto/x509/":                true,
-		"crypto/x509/internal/":       true,
-		"crypto/x509/internal/macos/": false,
-		"device/":                     false,
-		"examples/":                   false,
-		"internal/":                   true,
-		"internal/abi/":               false,
-		"internal/binary/":            false,
-		"internal/bytealg/":           false,
-		"internal/cm/":                false,
-		"internal/futex/":             false,
-		"internal/fuzz/":              false,
-		"internal/itoa/":              false,
-		"internal/poll/":              false,
-		"internal/reflectlite/":       false,
-		"internal/gclayout":           false,
-		"internal/task/":              false,
-		"internal/wasi/":              false,
-		"machine/":                    false,
-		"net/":                        true,
-		"net/http/":                   false,
-		"os/":                         true,
-		"reflect/":                    false,
-		"runtime/":                    false,
-		"sync/":                       true,
-		"testing/":                    true,
-		"tinygo/":                     false,
-		"unique/":                     false,
+// overrideMode controls how a directory under src/ is merged between
+// the upstream Go GOROOT and the TinyGo GOROOT.
+type overrideMode int
+
+const (
+	// overrideTinyGoOnly fully replaces the directory with TinyGo's version;
+	// no upstream files merge through.
+	overrideTinyGoOnly overrideMode = iota
+
+	// overrideMergeAll treats any matching TinyGo file in the directory as
+	// "TinyGo owns this directory at the file level" — i.e. upstream files
+	// at the same level are dropped. Subdirectories still merge through.
+	// This is the historical default for paths where TinyGo provides a
+	// drop-in package reimplementation.
+	overrideMergeAll
+
+	// overrideShadowByName lets TinyGo override individual files by name.
+	// For each TinyGo file with matching build tags, an upstream file with
+	// the same name is dropped; other upstream files merge through. Used
+	// when TinyGo needs surgical overrides of a large upstream package
+	// (e.g. src/net/ for wasip2) without reimplementing the whole package.
+	overrideShadowByName
+)
+
+// pathsToOverride lists the directories under src/ where TinyGo provides
+// some or all of the package and how the merge with upstream's GOROOT
+// should behave. See overrideMode for the semantics of each value.
+func pathsToOverride(goMinor int, needsSyscallPackage bool) map[string]overrideMode {
+	paths := map[string]overrideMode{
+		"":                            overrideMergeAll,
+		"crypto/":                     overrideMergeAll,
+		"crypto/rand/":                overrideTinyGoOnly,
+		"crypto/tls/":                 overrideTinyGoOnly,
+		"crypto/x509/":                overrideMergeAll,
+		"crypto/x509/internal/":       overrideMergeAll,
+		"crypto/x509/internal/macos/": overrideTinyGoOnly,
+		"device/":                     overrideTinyGoOnly,
+		"examples/":                   overrideTinyGoOnly,
+		"internal/":                   overrideMergeAll,
+		"internal/abi/":               overrideTinyGoOnly,
+		"internal/binary/":            overrideTinyGoOnly,
+		"internal/bytealg/":           overrideTinyGoOnly,
+		"internal/cm/":                overrideTinyGoOnly,
+		"internal/futex/":             overrideTinyGoOnly,
+		"internal/fuzz/":              overrideTinyGoOnly,
+		"internal/itoa/":              overrideTinyGoOnly,
+		"internal/poll/":              overrideTinyGoOnly,
+		"internal/reflectlite/":       overrideTinyGoOnly,
+		"internal/gclayout":           overrideTinyGoOnly,
+		"internal/task/":              overrideTinyGoOnly,
+		"internal/wasi/":              overrideTinyGoOnly,
+		"machine/":                    overrideTinyGoOnly,
+		"net/":                        overrideShadowByName,
+		"net/http/":                   overrideTinyGoOnly,
+		"os/":                         overrideMergeAll,
+		"reflect/":                    overrideTinyGoOnly,
+		"runtime/":                    overrideTinyGoOnly,
+		"sync/":                       overrideMergeAll,
+		"testing/":                    overrideMergeAll,
+		"tinygo/":                     overrideTinyGoOnly,
+		"unique/":                     overrideTinyGoOnly,
 	}
 
 	if goMinor >= 19 {
-		paths["crypto/internal/"] = true
-		paths["crypto/internal/boring/"] = true
-		paths["crypto/internal/boring/sig/"] = false
+		paths["crypto/internal/"] = overrideMergeAll
+		paths["crypto/internal/boring/"] = overrideMergeAll
+		paths["crypto/internal/boring/sig/"] = overrideTinyGoOnly
 	}
 
 	if goMinor >= 26 {
@@ -296,14 +335,14 @@ func pathsToOverride(goMinor int, needsSyscallPackage bool) map[string]bool {
 		// This is fine on systems with virtual memory, but causes RAM
 		// overflow on microcontrollers. Replace with a zero-size stub
 		// since TinyGo targets never use FIPS jitter entropy.
-		paths["crypto/internal/entropy/"] = true
-		paths["crypto/internal/entropy/v1.0.0/"] = false
+		paths["crypto/internal/entropy/"] = overrideMergeAll
+		paths["crypto/internal/entropy/v1.0.0/"] = overrideTinyGoOnly
 	}
 
 	if needsSyscallPackage {
-		paths["syscall/"] = true // include syscall/js
-		paths["internal/syscall/"] = true
-		paths["internal/syscall/unix/"] = false
+		paths["syscall/"] = overrideMergeAll // include syscall/js
+		paths["internal/syscall/"] = overrideMergeAll
+		paths["internal/syscall/unix/"] = overrideTinyGoOnly
 	}
 
 	if goMinor >= 26 {
@@ -311,8 +350,8 @@ func pathsToOverride(goMinor int, needsSyscallPackage bool) map[string]bool {
 		// constants assuming at least 32-bit uintptr. TinyGo supports
 		// 16-bit targets (AVR) where these constants overflow, so we
 		// provide a patched version.
-		paths["unicode/"] = true
-		paths["unicode/utf8/"] = false
+		paths["unicode/"] = overrideMergeAll
+		paths["unicode/utf8/"] = overrideTinyGoOnly
 	}
 
 	return paths

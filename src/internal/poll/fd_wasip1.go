@@ -21,6 +21,7 @@ package poll
 
 import (
 	"internal/task"
+	"io"
 	"syscall"
 	"time"
 	"unsafe"
@@ -444,6 +445,9 @@ func (fd *FD) sockRecv(p []byte) (int, error) {
 		errno := wasi_sock_recv(int32(fd.Sysfd), unsafe.Pointer(&iov), 1, 0, unsafe.Pointer(&n), unsafe.Pointer(&roFlags))
 		switch errno {
 		case 0:
+			if n == 0 && fd.ZeroReadIsEOF {
+				return 0, io.EOF
+			}
 			return int(n), nil
 		case wasiErrnoIntr:
 			continue

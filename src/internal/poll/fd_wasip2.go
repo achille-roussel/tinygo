@@ -62,15 +62,34 @@ func wasip2GetNetwork() wasinet.Network {
 // src/net/*_wasip2.go construct it via the open / dial / listen helpers
 // below rather than struct literal.
 type WasipNFD struct {
+	// Sysfd is a sentinel surfaced as int so that upstream Go's net
+	// package (which expects poll.FD to have an integer fd) compiles.
+	// Its value is the address of the WasipNFD itself reinterpreted —
+	// there is no real OS file descriptor on wasip2. Callers must not
+	// pass this through to syscalls.
+	Sysfd int
+
 	socket     wasitcp.TCPSocket
 	input      wasistreams.InputStream
 	output     wasistreams.OutputStream
 	isListener bool
 	closed     bool
 
+	// IsStream / ZeroReadIsEOF mirror the fd_wasip1 fields so net's
+	// fd_posix.go compiles. We don't read them — TCP is always stream
+	// and our Read returns io.EOF on its own.
+	IsStream      bool
+	ZeroReadIsEOF bool
+
 	rDeadline time.Time
 	wDeadline time.Time
 }
+
+// FD is the type name upstream Go's net package expects in internal/poll.
+// On wasip2 it aliases WasipNFD — same struct, different name to match
+// the fd_wasip1.go convention (where the wasip1 FD type is used as
+// poll.FD by upstream net's fd_posix.go).
+type FD = WasipNFD
 
 // errorCodeToError maps a wasi network ErrorCode into a Go error.
 func errorCodeToError(c wasinet.ErrorCode) error {
@@ -433,4 +452,175 @@ func Wasip2TCPClose(fd uintptr) error {
 //go:linkname Wasip2TCPSetDeadline
 func Wasip2TCPSetDeadline(fd uintptr, t time.Time) error {
 	return (*WasipNFD)(unsafe.Pointer(fd)).SetDeadline(t)
+}
+
+// The following methods and package-level helpers exist so that
+// upstream Go's net package compiles unchanged on wasip2 — fd_posix.go,
+// fd_unix.go, sock_posix.go, sockopt_*.go and friends call them on the
+// netFD's underlying poll.FD. Most of them are no-ops or return errors
+// on wasip2 because the real wasip2 socket lifecycle is driven through
+// the src/net/*_wasip2.go overrides (not yet written), which talk to
+// wasi:sockets directly rather than going through this shim. They're
+// kept here so a partial build still typechecks while the overrides
+// are being written.
+
+// Init brings the FD up to a usable state. On wasip2 there's nothing
+// to do — wasi:sockets resources are created already-pollable.
+func (fd *WasipNFD) Init(net string, pollable bool) error {
+	fd.IsStream = net == "tcp" || net == "tcp4" || net == "tcp6" || net == "unix"
+	fd.ZeroReadIsEOF = fd.IsStream
+	return nil
+}
+
+// Shutdown is reserved for the wasip2 TCP path. wasi:sockets/tcp
+// exposes shutdown directly on the TcpSocket resource; the src/net
+// override calls it without going through this method.
+func (fd *WasipNFD) Shutdown(how int) error {
+	if fd.closed {
+		return ErrFileClosing
+	}
+	return errors.New("wasip2 Shutdown: not yet implemented")
+}
+
+// CloseRead / CloseWrite drop one half of the duplex socket.
+func (fd *WasipNFD) CloseRead() error  { return fd.Shutdown(0) }
+func (fd *WasipNFD) CloseWrite() error { return fd.Shutdown(1) }
+
+// RawControl invokes f with the FD's Sysfd. wasip2 doesn't have a real
+// fd, but upstream net uses RawControl only via syscall.RawConn — the
+// callback is wasip2-aware code we control.
+func (fd *WasipNFD) RawControl(f func(uintptr)) error {
+	if fd.closed {
+		return ErrFileClosing
+	}
+	f(uintptr(fd.Sysfd))
+	return nil
+}
+
+func (fd *WasipNFD) RawRead(f func(uintptr) bool) error {
+	if fd.closed {
+		return ErrFileClosing
+	}
+	for {
+		if f(uintptr(fd.Sysfd)) {
+			return nil
+		}
+		// wasip2 RawRead can't park on a syscall fd — best-effort retry.
+	}
+}
+
+func (fd *WasipNFD) RawWrite(f func(uintptr) bool) error {
+	if fd.closed {
+		return ErrFileClosing
+	}
+	for {
+		if f(uintptr(fd.Sysfd)) {
+			return nil
+		}
+	}
+}
+
+// WaitWrite parks until the FD is writable. On wasip2 we lean on
+// the underlying output stream's pollable.
+func (fd *WasipNFD) WaitWrite() error {
+	if fd.closed {
+		return ErrFileClosing
+	}
+	if fd.isListener {
+		return errors.New("WaitWrite on listener FD")
+	}
+	cw := fd.output.CheckWrite()
+	if cw.IsErr() {
+		return errors.New("wasip2 WaitWrite: stream closed")
+	}
+	if *cw.OK() > 0 {
+		return nil
+	}
+	waitOnPollable(fd.output.Subscribe())
+	return nil
+}
+
+// Dup duplicates the FD. Not supported on wasip2 — resources don't
+// have a dup primitive in wasi:sockets.
+func (fd *WasipNFD) Dup() (int, string, error) {
+	return -1, "dup", errors.New("wasip2: Dup not supported")
+}
+
+// SetsockoptInt / GetsockoptInt / SetsockoptByte / etc. Stubs.
+func (fd *WasipNFD) SetsockoptInt(level, opt, value int) error  { return nil }
+func (fd *WasipNFD) GetsockoptInt(level, opt int) (int, error)  { return 0, nil }
+func (fd *WasipNFD) SetsockoptByte(level, opt int, value byte) error { return nil }
+func (fd *WasipNFD) SetsockoptLinger(level, opt int, l *Linger) error { return nil }
+func (fd *WasipNFD) SetsockoptInet4Addr(level, opt int, value [4]byte) error { return nil }
+func (fd *WasipNFD) SetsockoptIPMreq(level, opt int, mreq *IPMreq) error     { return nil }
+func (fd *WasipNFD) SetsockoptIPMreqn(level, opt int, mreq *IPMreqn) error   { return nil }
+func (fd *WasipNFD) SetsockoptIPv6Mreq(level, opt int, mreq *IPv6Mreq) error { return nil }
+
+// ReadLock / ReadUnlock / WriteLock / WriteUnlock are mutex hooks on
+// upstream's poll.FD. No-op on wasip2 (our Read/Write paths are
+// goroutine-safe via the cooperative scheduler).
+func (fd *WasipNFD) ReadLock() error    { return nil }
+func (fd *WasipNFD) ReadUnlock()        {}
+func (fd *WasipNFD) WriteLock() error   { return nil }
+func (fd *WasipNFD) WriteUnlock()       {}
+
+// WriteOnce is upstream's single-syscall write entry point used by
+// connect retries. We just forward to Write.
+func (fd *WasipNFD) WriteOnce(p []byte) (int, error) { return fd.Write(p) }
+
+// String is the upstream poll-package alias for a non-importable
+// string type. Defined here so files referencing poll.String compile.
+type String string
+
+// IPMreq / IPv6Mreq are the legacy multicast structs upstream's
+// sockopt code references. We don't support multicast on wasip2;
+// these exist solely so the types resolve at compile time.
+type IPMreq struct {
+	Multiaddr [4]byte
+	Interface [4]byte
+}
+
+type IPv6Mreq struct {
+	Multiaddr [16]byte
+	Interface uint32
+}
+
+// Linger is the SO_LINGER struct upstream sockopt_posix.go uses.
+type Linger struct {
+	Onoff  int32
+	Linger int32
+}
+
+// IPMreqn is the linux multicast struct.
+type IPMreqn struct {
+	Multiaddr [4]byte
+	Interface [4]byte
+	Ifindex   int32
+}
+
+// CloseFunc is the hook upstream uses to override Close in tests. We
+// don't have a unix fd to close, so default to a no-op.
+var CloseFunc func(int) error = func(int) error { return nil }
+
+// AcceptFunc mirrors CloseFunc — overridable by tests. No-op default.
+var AcceptFunc func(int) (int, any, error) = func(int) (int, any, error) {
+	return -1, nil, errors.New("wasip2: AcceptFunc not implemented")
+}
+
+// DupCloseOnExec is the upstream helper used by os.File to duplicate
+// an fd with FD_CLOEXEC set. Not supported on wasip2.
+func DupCloseOnExec(fd int) (int, string, error) {
+	return -1, "dup", errors.New("wasip2: DupCloseOnExec not supported")
+}
+
+// SendFile / Splice are referenced by upstream sendfile_linux.go and
+// splice_linux.go. We provide stubs returning (0, ENOSYS, false) so
+// the upstream files compile; the actual code path is shadowed
+// elsewhere with TinyGo no-op files.
+func SendFile(dstFD *FD, src int, size int64) (int64, error, bool) {
+	return 0, errors.New("wasip2: SendFile not supported"), false
+}
+
+func Splice(dst, src *FD, max int64) (int64, int64, error) {
+	return 0, 0, errors.New("wasip2: Splice not supported")
 }

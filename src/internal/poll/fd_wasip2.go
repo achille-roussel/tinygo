@@ -568,6 +568,59 @@ func (fd *WasipNFD) WriteUnlock()       {}
 // connect retries. We just forward to Write.
 func (fd *WasipNFD) WriteOnce(p []byte) (int, error) { return fd.Write(p) }
 
+// UDP / message-oriented entry points referenced by upstream net's
+// fd_posix.go. wasip2 supports UDP via wasi:sockets/udp resources but
+// we haven't wired that here yet — return ENOSYS-ish stubs so the
+// upstream package builds. None of these are reachable on the TCP
+// happy path the wasip2 net override targets.
+func (fd *WasipNFD) ReadFrom(p []byte) (int, any, error) {
+	return 0, nil, errors.New("wasip2: ReadFrom not supported")
+}
+
+func (fd *WasipNFD) ReadFromInet4(p []byte, from *[4]byte) (int, error) {
+	return 0, errors.New("wasip2: ReadFromInet4 not supported")
+}
+
+func (fd *WasipNFD) ReadFromInet6(p []byte, from *[16]byte) (int, error) {
+	return 0, errors.New("wasip2: ReadFromInet6 not supported")
+}
+
+func (fd *WasipNFD) ReadMsg(p, oob []byte, flags int) (int, int, int, any, error) {
+	return 0, 0, 0, nil, errors.New("wasip2: ReadMsg not supported")
+}
+
+func (fd *WasipNFD) ReadMsgInet4(p, oob []byte, flags int, from *[4]byte) (int, int, int, error) {
+	return 0, 0, 0, errors.New("wasip2: ReadMsgInet4 not supported")
+}
+
+func (fd *WasipNFD) ReadMsgInet6(p, oob []byte, flags int, from *[16]byte) (int, int, int, error) {
+	return 0, 0, 0, errors.New("wasip2: ReadMsgInet6 not supported")
+}
+
+func (fd *WasipNFD) WriteTo(p []byte, to any) (int, error) {
+	return 0, errors.New("wasip2: WriteTo not supported")
+}
+
+func (fd *WasipNFD) WriteToInet4(p []byte, to *[4]byte) (int, error) {
+	return 0, errors.New("wasip2: WriteToInet4 not supported")
+}
+
+func (fd *WasipNFD) WriteToInet6(p []byte, to *[16]byte) (int, error) {
+	return 0, errors.New("wasip2: WriteToInet6 not supported")
+}
+
+func (fd *WasipNFD) WriteMsg(p, oob []byte, to any) (int, int, error) {
+	return 0, 0, errors.New("wasip2: WriteMsg not supported")
+}
+
+func (fd *WasipNFD) WriteMsgInet4(p, oob []byte, to *[4]byte) (int, int, error) {
+	return 0, 0, errors.New("wasip2: WriteMsgInet4 not supported")
+}
+
+func (fd *WasipNFD) WriteMsgInet6(p, oob []byte, to *[16]byte) (int, int, error) {
+	return 0, 0, errors.New("wasip2: WriteMsgInet6 not supported")
+}
+
 // String is the upstream poll-package alias for a non-importable
 // string type. Defined here so files referencing poll.String compile.
 type String string
